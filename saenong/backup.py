@@ -14,10 +14,13 @@ from datetime import datetime
 from pathlib import Path
 
 from .data import KST
+from .publication import FILES, published_root
 from collector.schedule import due_in
 
+PUBLISHED_METADATA = (*FILES, 'publication.json')
+
 METADATA = ('categories.json', 'product-categories.json', 'category-sources.json',
-            'collection-status.json', 'scheduled-last-attempt.json')
+            'collection-status.json', 'scheduled-last-attempt.json', 'closed-no-data.json', 'closed-review.json')
 
 
 def create_backup(root, destination, keep=7):
@@ -41,6 +44,22 @@ def create_backup(root, destination, keep=7):
                     expected = {row[0] for row in db.execute('SELECT DISTINCT sha256 FROM snapshots')}
             with tarfile.open(temporary, 'w:gz') as archive:
                 archive.add(copy, arcname='sales.sqlite3')
+                view = published_root(root)
+                if view != root:
+                    frozen = Path(folder) / 'published.sqlite3'
+                    with closing(sqlite3.connect((view / 'sales.sqlite3').resolve().as_uri() + '?mode=ro', uri=True)) as source:
+                        with closing(sqlite3.connect(frozen)) as db:
+                            source.backup(db)
+                            expected.update(row[0] for row in db.execute('SELECT DISTINCT sha256 FROM snapshots'))
+                    archive.add(frozen, arcname='published-view/sales.sqlite3')
+                    for key in PUBLISHED_METADATA:
+                        path = view / key
+                        if path.is_file() and not path.is_symlink():
+                            content = path.read_bytes()
+                            json.loads(content)
+                            member = tarfile.TarInfo('published-view/' + key)
+                            member.size, member.mode = len(content), 0o600
+                            archive.addfile(member, io.BytesIO(content))
                 for key in METADATA:
                     path = root / key
                     if path.is_file() and not path.is_symlink():
@@ -87,7 +106,7 @@ def restore_backup(archive_path, root):
         if len(names) != len(set(names)) or 'sales.sqlite3' not in names:
             raise ValueError('유효한 백업 구성이 아닙니다.')
         for member in members:
-            allowed = member.name in ('sales.sqlite3', *METADATA) or re.fullmatch(r'private-originals/[0-9a-f]{64}\.xls', member.name)
+            allowed = member.name in ('sales.sqlite3', *METADATA, *('published-view/' + name for name in ('sales.sqlite3', *PUBLISHED_METADATA))) or re.fullmatch(r'private-originals/[0-9a-f]{64}\.xls', member.name)
             if not member.isfile() or not allowed:
                 raise ValueError('백업에 허용되지 않은 경로가 있습니다.')
         # Validate in staging before making any restored file visible.
@@ -100,10 +119,14 @@ def restore_backup(archive_path, root):
                     while chunk := source.read(1024 * 1024):
                         target.write(chunk)
                 path.chmod(0o600)
-            with closing(sqlite3.connect(stage / 'sales.sqlite3')) as db:
-                if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
-                    raise ValueError('복구 데이터베이스 검증에 실패했습니다.')
-                hashes = {row[0] for row in db.execute('SELECT DISTINCT sha256 FROM snapshots')}
+            hashes = set()
+            for database in (stage / 'sales.sqlite3', stage / 'published-view' / 'sales.sqlite3'):
+                if not database.exists():
+                    continue
+                with closing(sqlite3.connect(database)) as db:
+                    if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                        raise ValueError('복구 데이터베이스 검증에 실패했습니다.')
+                    hashes.update(row[0] for row in db.execute('SELECT DISTINCT sha256 FROM snapshots'))
             for digest in hashes:
                 if not re.fullmatch('[0-9a-f]{64}', digest):
                     raise ValueError('복구 원본 해시가 유효하지 않습니다.')
@@ -116,6 +139,10 @@ def restore_backup(archive_path, root):
             for key in METADATA:
                 if (stage / key).exists():
                     json.loads((stage / key).read_text('utf-8'))
+            for key in PUBLISHED_METADATA:
+                path = stage / 'published-view' / key
+                if path.exists():
+                    json.loads(path.read_text('utf-8'))
             for path in stage.iterdir():
                 path.replace(root / path.name)
 

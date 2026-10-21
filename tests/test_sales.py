@@ -17,6 +17,7 @@ from saenong.data import KST
 from collector.run import collect_job
 from collector.categories import sync_categories
 from unittest.mock import patch
+import hashlib
 
 
 def report(net=100, discount=10, broken=False):
@@ -36,6 +37,75 @@ def daily_report(gross, net, discount, day):
 
 
 class SalesTest(unittest.TestCase):
+    def test_closed_month_uses_saved_report_without_atpos_authentication(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            file = root / 'source.xls'
+            file.write_bytes(report())
+            import_report(root, file, '가락', '2025-03', '2025-03-31', source_query={'check_yn': '5'})
+            with patch('collector.run.Client') as factory:
+                result = collect_job(root, ['2025-03'], ['가락'], ['monthly-profit'], skip_existing=True)
+                factory.assert_not_called()
+            self.assertEqual(len(result['cached']), 1)
+            self.assertEqual(result['failures'], [])
+            self.assertEqual(dashboard(root, '2025-03')['stores'][0]['gross'], 110)
+
+    def test_intraday_month_end_snapshot_is_not_frozen_as_final(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            file = root / 'source.xls'
+            file.write_bytes(report())
+            import_report(root, file, '가락', '2025-03', '2025-03-31', source_query={'check_yn': '5'})
+            with connect(root) as db:
+                db.execute("UPDATE snapshots SET imported_at='2025-03-31T10:00:00+09:00'")
+            with patch('collector.run.Client') as factory:
+                factory.return_value.collect.return_value = {'kind': 'monthly-profit', 'store': '가락',
+                    'period': '2025-03', 'as_of': '2025-03-31', 'rows': 1, 'duplicate': True}
+                collect_job(root, ['2025-03'], ['가락'], ['monthly-profit'], skip_existing=True)
+                factory.return_value.collect.assert_called_once()
+            # A byte-identical download after month close is still a new confirmation.
+            result = import_report(root, file, '가락', '2025-03', '2025-03-31',
+                                   source_query={'check_yn': '5'}, collected_at='2025-04-01T08:00:00+09:00')
+            self.assertTrue(result['duplicate'])
+            with patch('collector.run.Client') as factory:
+                collect_job(root, ['2025-03'], ['가락'], ['monthly-profit'], skip_existing=True)
+                factory.assert_not_called()
+
+    def test_closed_explicit_no_data_reuses_verified_original(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            content = b'synthetic archived no-data response'
+            digest = hashlib.sha256(content).hexdigest()
+            originals = root / 'private-originals'
+            originals.mkdir()
+            (originals / (digest + '.xls')).write_bytes(content)
+            with patch('collector.run.Client') as factory:
+                factory.return_value.last_original_sha256 = digest
+                factory.return_value.collect.side_effect = ValueError('원본이 매출내역 없음으로 응답했습니다.')
+                collect_job(root, ['2025-03'], ['가락'], ['promotion-items'], skip_existing=True)
+            with patch('collector.run.Client') as factory:
+                result = collect_job(root, ['2025-03'], ['가락'], ['promotion-items'], skip_existing=True)
+                factory.assert_not_called()
+            self.assertTrue(result['no_data'][0]['cached'])
+            (originals / (digest + '.xls')).unlink()
+            with patch('collector.run.Client') as factory:
+                factory.side_effect = RuntimeError('Missing original must require source verification')
+                collect_job(root, ['2025-03'], ['가락'], ['promotion-items'], skip_existing=True)
+                factory.assert_called_once()
+
+    def test_failed_closed_report_is_retained_for_review_without_daily_retries(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch('collector.run.Client') as factory:
+                factory.return_value.collect.side_effect = RuntimeError('Source unavailable')
+                collect_job(root, ['2025-03'], ['가락'], ['promotion-items'], skip_existing=True)
+            with patch('collector.run.Client') as factory:
+                result = collect_job(root, ['2025-03'], ['가락'], ['promotion-items'], skip_existing=True)
+                factory.assert_not_called()
+            self.assertEqual(len(result['review_required']), 1)
+            self.assertEqual(result['no_data'], [])
+            self.assertTrue(dashboard(root, '2025-03')['stores'][0]['missing'])
+
     def test_unreconciled_profit_is_withheld_and_target_uses_confirmed_revenue(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

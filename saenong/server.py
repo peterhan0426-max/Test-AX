@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .data import dashboard
+from .publication import published_root, publication_status
 from collector.credentials import connect as connect_source, version as source_version
 
 
@@ -33,8 +34,10 @@ def operational_status(root):
     available = bool(valid_name and (backup_dir / name).is_file() and not (backup_dir / name).is_symlink())
     connected = source_version(root) is not None or os.environ.get('SAENONG_SOURCE_CONNECTED') == '1'
     return {'collection': {'enabled': os.environ.get('SAENONG_AUTOCOLLECT') == '1', 'connected': connected,
-                           'hour_kst': 8, 'last_finished_at': collection.get('finished_at'),
+                           'state': collection.get('state'), 'last_started_at': collection.get('started_at'),
+                           'hour_kst': 5, 'last_finished_at': collection.get('finished_at'),
                            'failure_count': len(collection.get('failures', []))},
+            'publication': publication_status(root),
             'backup': {'available': available,
                        'last_completed_at': backup.get('finished_at') if available else None}}
 
@@ -71,7 +74,7 @@ def create_server(root, host='127.0.0.1', port=8000, password=None, username='sa
             elif url.path == '/api/dashboard':
                 query = parse_qs(url.query)
                 try:
-                    data = dashboard(root, query.get('period', [None])[0])
+                    data = dashboard(published_root(root), query.get('period', [None])[0])
                     body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')
                 except (ValueError, KeyError):
                     self.send_error(400, 'Invalid period or category configuration')
@@ -84,7 +87,7 @@ def create_server(root, host='127.0.0.1', port=8000, password=None, username='sa
                 self.send_header('Content-Type', 'application/json; charset=utf-8')
             elif url.path == '/health':
                 try:
-                    dashboard(root)
+                    dashboard(published_root(root))
                 except Exception:
                     self.send_error(503, 'Database unavailable')
                     return

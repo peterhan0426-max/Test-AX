@@ -40,7 +40,7 @@ def main():
                     page.locator('#source-password').fill('synthetic-password')
                     page.locator('#source-submit').click()
                     page.wait_for_function("document.querySelector('#source-message').textContent.includes('연결되었습니다')")
-                    page.wait_for_function("document.querySelector('#automation').textContent.includes('자동 수집 예약')")
+                    page.wait_for_function("document.querySelector('#automation').textContent.includes('매일 오전 5시')")
                     assert page.locator('#source-password').input_value() == ''
                     assert page.locator('#source-account').input_value() == ''
                     assert load(root) == ('synthetic-account', 'synthetic-password')

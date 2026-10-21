@@ -51,7 +51,7 @@ def connect(root):
         db.close()
 
 
-def import_report(root, file, store, period, as_of, source_query=None):
+def import_report(root, file, store, period, as_of, source_query=None, collected_at=None):
     root, file = Path(root), Path(file)
     store = store_name(store)
     last = month_end(period)
@@ -64,6 +64,10 @@ def import_report(root, file, store, period, as_of, source_query=None):
     report = read_report(content)
     if source_query is not None:
         report['source_query'] = source_query
+    if collected_at is not None:
+        if datetime.fromisoformat(collected_at).tzinfo is None:
+            raise ValueError('수집 확인 시각에는 시간대가 필요합니다.')
+        report['collected_at'] = collected_at
     if report['kind'] == 'daily-sales':
         dates = [date.fromisoformat(row['date']) for row in report['rows']]
         if any(day.strftime('%Y-%m') != period or day > cutoff for day in dates):
@@ -160,6 +164,8 @@ def dashboard(root, period=None):
         snapshots.append(source)
     for key, value in monthly.items():
         other = daily_totals.get(key)
+        if other and other['as_of'] != value['as_of']:
+            blocked[key] = '일별 매출과 손익 자료의 기준일이 달라 이익·마진을 표시하지 않습니다.'
         if other and other['as_of'] == value['as_of'] and value['as_of'] < datetime.now(KST).date().isoformat() and other['gross'] != value['gross']:
             blocked[key] = '일별·월별 총매출이 달라 이익·마진을 표시하지 않습니다.'
     revenue = {**monthly, **daily_totals}
@@ -251,6 +257,8 @@ def dashboard(root, period=None):
     collection = json.loads(status_file.read_text('utf-8')) if status_file.exists() else None
     if collection and collection.get('failures'):
         warnings.append(f'최근 일괄 수집 기록에 {len(collection["failures"])}개 실패 항목이 있습니다. 이후 개별 반영 여부는 자료별 기준일을 따릅니다.')
+    if collection and collection.get('review_required'):
+        warnings.append(f'과거 자료 {len(collection["review_required"])}건은 확인 대기 중입니다. 자동으로 반복 조회하거나 0원으로 처리하지 않습니다.')
     return {'period': selected, 'periods': available, 'stores': stores, 'collection': collection,
             'categories': [{'store': store, 'category': category, **financials(values)}
                            for (store, category), values in sorted(categories.items())],

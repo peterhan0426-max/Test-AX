@@ -94,15 +94,13 @@ class Client:
         if not original.exists():
             with original.open('xb') as stream:
                 stream.write(content)
+        self.last_original_sha256 = original.stem
         report = read_report(content)
         if report['kind'] != kind:
             raise RuntimeError('요청한 보고서와 다른 파일이 반환됐습니다.')
         return content, report
 
     def collect(self, kind, store, period, cutoff):
-        if kind == 'monthly-profit':
-            # The source monthly report has no day cutoff. Do not label current live MTD as yesterday.
-            cutoff = min(month_end(period), datetime.now(KST).date()).isoformat()
         content, report = self.report(kind, store, period, cutoff)
         folder = self.root / 'downloads'
         folder.mkdir(parents=True, exist_ok=True)
@@ -111,7 +109,8 @@ class Client:
         file.write_bytes(content)
         try:
             result = import_report(self.root, file, store, period, cutoff,
-                                   source_query=fields_for(kind, store, period, cutoff))
+                                   source_query=fields_for(kind, store, period, cutoff),
+                                   collected_at=datetime.now(KST).isoformat())
         finally:
             file.unlink(missing_ok=True)
         result.update(store=store, period=period, as_of=cutoff)

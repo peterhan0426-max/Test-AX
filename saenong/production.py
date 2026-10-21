@@ -69,12 +69,12 @@ def main():
         worker_environment = {key: value for key, value in environment.items() if key != 'SAENONG_VIEWER_PASSWORD'}
         if collect:
             children.append(subprocess.Popen([sys.executable, '-u', '-m', 'collector.schedule',
-                                              '--data-dir', str(data), '--hour', '8'], env=worker_environment))
+                                              '--data-dir', str(data), '--hour', '5'], env=worker_environment))
         backup_environment = {key: value for key, value in worker_environment.items() if key not in ('ATPOS_ID', 'ATPOS_PASSWORD')}
         if not bootstrap:
             children.append(subprocess.Popen([sys.executable, '-u', '-m', 'saenong.backup', '--daily',
                                               '--data-dir', str(data), '--backup-dir', str(backups)], env=backup_environment))
-        print('자료 이관 모드 시작.' if bootstrap else '운영 프로세스 시작: 매일 08:00 수집, 09:00 백업 (한국 시간).', flush=True)
+        print('자료 이관 모드 시작.' if bootstrap else '운영 프로세스 시작: 매일 05:00 전일 자료 수집, 09:00 백업 (한국 시간).', flush=True)
         while not stop:
             if any(child.poll() is not None for child in children):
                 raise RuntimeError('하위 프로세스 종료: 호스팅에서 전체 서비스를 다시 시작해야 합니다.')

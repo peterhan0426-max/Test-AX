@@ -73,7 +73,7 @@ class ConnectionTest(unittest.TestCase):
                 server.server_close()
                 worker.join()
 
-    def test_scheduler_waits_for_account_and_attempts_once_per_new_connection(self):
+    def test_new_account_does_not_trigger_an_extra_daytime_collection(self):
         with tempfile.TemporaryDirectory() as folder:
             now = datetime(2026, 10, 21, 9, tzinfo=KST)
             with patch('sys.argv', ['schedule', '--data-dir', folder]), \
@@ -83,7 +83,23 @@ class ConnectionTest(unittest.TestCase):
                     patch('collector.schedule.collect_job', return_value={'failures': []}) as collect:
                 clock.now.return_value = now
                 schedule.main()
-            self.assertEqual(collect.call_count, 2)
+            self.assertEqual(collect.call_count, 0)
             marker = json.loads((Path(folder) / 'scheduled-last-attempt.json').read_text())
-            self.assertEqual(marker['credential_version'], 'v2')
+            self.assertEqual(marker['reason'], 'source_not_connected')
             self.assertEqual(marker['date'], '2026-10-21')
+
+    def test_five_am_uses_yesterday_and_month_boundary_without_extra_connection_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            now = datetime(2026, 11, 1, 5, tzinfo=KST)
+            with patch('sys.argv', ['schedule', '--data-dir', folder]), \
+                    patch('collector.schedule.datetime') as clock, \
+                    patch('collector.schedule.time.sleep'), \
+                    patch('collector.schedule.version', side_effect=['v1', 'v2', KeyboardInterrupt]), \
+                    patch('collector.schedule.collect_job', return_value={'failures': []}) as collect:
+                clock.now.return_value = now
+                schedule.main()
+            collect.assert_called_once()
+            self.assertEqual(collect.call_args.args[1], ['2026-09', '2026-10'])
+            self.assertEqual(collect.call_args.kwargs['through_day'], '2026-10-31')
+            self.assertTrue(collect.call_args.kwargs['publish'])
+            self.assertTrue(collect.call_args.kwargs['skip_existing'])
