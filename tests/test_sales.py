@@ -29,7 +29,31 @@ def report(net=100, discount=10, broken=False):
             '</tr><tr><td colspan="4">전체 합계</td>' + cells(total) + '</tr></table>').encode('cp949')
 
 
+def daily_report(gross, net, discount, day):
+    rows = [['매출일자', '총매출', '순매출', '할인'], ['매출일자', '총매출', '순매출', '할인'],
+            [day, str(gross), str(net), str(discount)], ['전체합계', str(gross), str(net), str(discount)]]
+    return ('<table>' + ''.join('<tr>' + ''.join('<td>' + value + '</td>' for value in row) + '</tr>' for row in rows) + '</table>').encode('cp949')
+
+
 class SalesTest(unittest.TestCase):
+    def test_unreconciled_profit_is_withheld_and_target_uses_confirmed_revenue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            monthly_file, daily_file = root / 'monthly.xls', root / 'daily.xls'
+            monthly_file.write_bytes(report())
+            daily_file.write_bytes(daily_report(120, 100, 20, '2025-03-01'))
+            import_report(root, monthly_file, '가락', '2025-03', '2025-03-31', source_query={'check_yn': '5'})
+            import_report(root, daily_file, '가락', '2025-03', '2025-03-31')
+            view = dashboard(root, '2025-03')
+            self.assertEqual(view['stores'][0]['gross'], 120)
+            self.assertIsNone(view['stores'][0]['profit'])
+            self.assertIsNone(view['stores'][0]['margin'])
+            self.assertTrue(view['stores'][0]['revenue_only'])
+            self.assertEqual(view['categories'], [])
+            monthly_file.write_bytes(report(net=200))
+            import_report(root, monthly_file, '가락', '2026-03', '2026-03-31', source_query={'check_yn': '5'})
+            self.assertEqual(dashboard(root, '2026-03')['stores'][0]['sales_target'], 126)
+
     def test_retired_category_is_kept_in_other_without_guessing_ambiguous_labels(self):
         rows = [{'product': 'A', 'subcategory': '공통'}, {'product': 'B', 'subcategory': '공통'},
                 {'product': 'C', 'subcategory': '냉동'}, {'product': 'D', 'subcategory': '옛분류'}]

@@ -145,23 +145,47 @@ def dashboard(root, period=None):
     products = json.loads(product_file.read_text('utf-8')) if product_file.exists() else {}
     if any(value not in CATEGORIES for value in [*mappings.values(), *products.values()]):
         raise ValueError('카테고리 연결 설정에 허용되지 않은 분류가 있습니다.')
-    monthly, snapshots, category_history = {}, [], {}
+    monthly, daily_totals, snapshots, category_history, blocked = {}, {}, [], {}, {}
     for source in reports:
         source['parsed'] = json.loads(source.pop('data'))
         if source['kind'] == 'monthly-profit':
             monthly[(source['store'], source['period'])] = {
                 **financials(source['parsed']['totals']), 'as_of': source['as_of']}
-            for row in source['parsed']['rows']:
-                category = products.get(row['product'], mappings.get(row['subcategory'], '미분류'))
-                values = category_history.setdefault(category, {}).setdefault(source['period'], {})
-                values[source['store']] = values.get(source['store'], 0) + row['net'] + row['discount']
+            mode = source['parsed'].get('source_query', {}).get('check_yn')
+            if mode is not None and mode != '5':
+                blocked[(source['store'], source['period'])] = '전체 상품 범위의 손익 자료를 확인하지 못했습니다.'
+        elif source['kind'] == 'daily-sales':
+            daily_totals[(source['store'], source['period'])] = {
+                **source['parsed']['totals'], 'as_of': source['as_of']}
         snapshots.append(source)
+    for key, value in monthly.items():
+        other = daily_totals.get(key)
+        if other and other['as_of'] == value['as_of'] and value['as_of'] < datetime.now(KST).date().isoformat() and other['gross'] != value['gross']:
+            blocked[key] = '일별·월별 총매출이 달라 이익·마진을 표시하지 않습니다.'
+    revenue = {**monthly, **daily_totals}
+    trend_values = dict(revenue)
+    for key, value in monthly.items():
+        if key not in blocked:
+            trend_values[key] = value
+    for source in snapshots:
+        if source['kind'] != 'monthly-profit' or (source['store'], source['period']) in blocked:
+            continue
+        for row in source['parsed']['rows']:
+            category = products.get(row['product'], mappings.get(row['subcategory'], '미분류'))
+            values = category_history.setdefault(category, {}).setdefault(source['period'], {})
+            values[source['store']] = values.get(source['store'], 0) + row['net'] + row['discount']
     stores, categories, promotions, details, days, warnings = [], {}, [], {}, {}, []
     for store, (_, margin_goal) in STORES.items():
-        item = monthly.get((store, selected))
+        key = store, selected
+        item = monthly.get(key) if key not in blocked else None
+        revenue_only = item is None and key in revenue
+        if revenue_only:
+            item = {**revenue[key], **{field: None for field in ('profit', 'margin', 'cogs', 'purchases', 'opening', 'closing')}}
+            warnings.append(f'{store}: ' + blocked.get(key, '매입·재고 자료가 없어 이익·마진을 계산하지 않았습니다.'))
         if item:
-            target = sales_target(store, selected, monthly)
+            target = sales_target(store, selected, revenue)
             stores.append({'store': store, **item, 'sales_target': target,
+                           'revenue_only': revenue_only,
                            'margin_target': margin_goal,
                            'achievement': item['gross'] / target * 100 if target else None,
                            'complete': date.fromisoformat(item['as_of']) == month_end(selected)})
@@ -175,6 +199,8 @@ def dashboard(root, period=None):
             label = {'opening': '기초재고', 'closing': '기말재고'}.get(key, key)
             warnings.append(f'{store}: 원본 {label} 전체 합계와 상품별 표시금액 합계가 {value:+,}원 다릅니다. 전체 지표는 원본 전체 합계를 사용합니다.')
         if source['kind'] == 'monthly-profit':
+            if (store, selected) in blocked:
+                continue
             for row in parsed['rows']:
                 category = products.get(row['product'], mappings.get(row['subcategory'], '미분류'))
                 key = store, category
@@ -214,9 +240,9 @@ def dashboard(root, period=None):
             daily_dates.append(current.isoformat())
             current += timedelta(days=1)
     trend_months = []
-    if monthly:
-        current = min(month for _, month in monthly)
-        end = max(month for _, month in monthly)
+    if trend_values:
+        current = min(month for _, month in trend_values)
+        end = max(month for _, month in trend_values)
         while current <= end:
             trend_months.append(current)
             day = month_end(current) + timedelta(days=1)
@@ -224,16 +250,16 @@ def dashboard(root, period=None):
     status_file = Path(root) / 'collection-status.json'
     collection = json.loads(status_file.read_text('utf-8')) if status_file.exists() else None
     if collection and collection.get('failures'):
-        warnings.append(f'최근 수집에서 {len(collection["failures"])}개 항목이 반영되지 않았습니다. 해당 항목은 이전 자료를 유지합니다.')
+        warnings.append(f'최근 일괄 수집 기록에 {len(collection["failures"])}개 실패 항목이 있습니다. 이후 개별 반영 여부는 자료별 기준일을 따릅니다.')
     return {'period': selected, 'periods': available, 'stores': stores, 'collection': collection,
             'categories': [{'store': store, 'category': category, **financials(values)}
                            for (store, category), values in sorted(categories.items())],
             'promotions': promotions, 'promotion_details': details,
             'daily': [{'date': day, 'stores': days.get(day, {})} for day in daily_dates],
-            'trend': [{'period': month, 'stores': {store: value['gross'] for (store, p), value in monthly.items() if p == month}}
+            'trend': [{'period': month, 'stores': {store: value['gross'] for (store, p), value in trend_values.items() if p == month}}
                       for month in trend_months],
             'partial_months': {month: {store: date.fromisoformat(value['as_of']) < month_end(month)
-                                      for (store, p), value in monthly.items() if p == month} for month in trend_months},
+                                      for (store, p), value in trend_values.items() if p == month} for month in trend_months},
             'category_trend': {category: [{'period': month, 'stores': history.get(month, {})} for month in trend_months]
                                for category, history in category_history.items()},
             'sources': [{'kind': row['kind'], 'store': row['store'], 'period': row['period'],

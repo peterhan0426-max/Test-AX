@@ -85,8 +85,9 @@ class Client:
         request = urllib.request.Request(ORIGIN + PATHS[kind],
                                          data=urllib.parse.urlencode(fields, encoding='cp949').encode(),
                                          headers={'Referer': ORIGIN + PATHS[kind]}, method='POST')
-        with self.opener.open(request, timeout=60) as response:
-            text = read_limited(response).decode('cp949')
+        budget = 300 if kind == 'monthly-profit' and period == datetime.now(KST).strftime('%Y-%m') else 120
+        with self.opener.open(request, timeout=120) as response:
+            text = read_limited(response, budget).decode('cp949')
         content = export_data(text)
         original = self.root / 'private-originals' / (hashlib.sha256(content).hexdigest() + '.xls')
         original.parent.mkdir(parents=True, exist_ok=True)

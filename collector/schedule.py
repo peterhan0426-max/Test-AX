@@ -24,10 +24,14 @@ def main():
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--hour', type=int, default=8, choices=range(24))
     parser.add_argument('--minute', type=int, default=0, choices=range(60))
+    parser.add_argument('--no-catch-up', action='store_true', help='오늘 정시가 지났으면 다음 정시까지 대기')
     args = parser.parse_args()
     args.data_dir.mkdir(parents=True, exist_ok=True)
     marker = args.data_dir / 'scheduled-last-attempt.json'
     last = json.loads(marker.read_text())['date'] if marker.exists() else None
+    now = datetime.now(KST)
+    if args.no_catch_up and now >= now.replace(hour=args.hour, minute=args.minute, second=0, microsecond=0):
+        last = now.date().isoformat()
     print(f'자동 수집 대기: 매일 {args.hour:02}:{args.minute:02} 한국 시간', flush=True)
     try:
         while True:
