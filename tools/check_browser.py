@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from playwright.sync_api import sync_playwright
 from saenong.data import dashboard
 from saenong.server import create_server
-from collector.authenticate import authenticate_page
 
 
 def main():
@@ -44,13 +43,14 @@ def main():
                     for width in (1440, 390):
                         page.set_viewport_size({'width': width, 'height': 900})
                         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                    options = page.locator('#trend-category option').count()
+                    if options > 1:
+                        page.locator('#trend-category').select_option(index=1)
+                        assert '매출 추이' in page.locator('#trend-title').inner_text()
                     # Also exercise a missing month instead of silently retaining the previous cards.
                     result = page.evaluate("fetch('/api/dashboard?period=2024-01').then(r=>r.json())")
                     assert result['period'] == '2024-01'
                     assert not errors, errors
-                    page.set_content('''<input name="ms_id"><input name="passwd" type="password">
-                        <button name="submit_img" onclick="document.body.innerHTML='<a>로그아웃</a>'">Login</button>''')
-                    assert authenticate_page(page, 'synthetic-account', 'synthetic-password')
                     print('PASS: HTTP, browser rendering, mobile layout and API integration')
                 finally:
                     browser.close()

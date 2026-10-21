@@ -104,11 +104,14 @@ def read_report(content):
     else:
         raise ValueError('알 수 없는 보고서입니다.')
     output, totals = [], None
+    differences = {}
     checks = None
     for row in body:
         if not row:
             continue
         footer = clean(row[0]) in ('전체합계', '합계')
+        if clean(row[0]) in ('매출내역이없습니다.', '조회된자료가없습니다.'):
+            raise ValueError('원본이 매출내역 없음으로 응답했습니다. 0원으로 대체하지 않습니다.')
         if kind == 'promotion-summary':
             if len(row) != 8:
                 raise ValueError('프로모션 요약 열 수가 다릅니다.')
@@ -135,8 +138,13 @@ def read_report(content):
             elif kind == 'daily-sales':
                 if not footer and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', row[0]):
                     continue
-                item = {'date': row[0], 'gross': amount(record['총매출']),
-                        'net': amount(record['순매출']), 'discount': amount(record['할인'])}
+                no_sales = any('해당매출이없습니다' in clean(value) for value in row)
+                blank_money = all(not record[key].strip() for key in ('총매출', '순매출', '할인'))
+                if no_sales and blank_money:
+                    item = {'date': row[0], 'gross': 0, 'net': 0, 'discount': 0, 'confirmed_no_sales': True}
+                else:
+                    item = {'date': row[0], 'gross': amount(record['총매출']),
+                            'net': amount(record['순매출']), 'discount': amount(record['할인'])}
                 if item['gross'] != item['net'] + item['discount']:
                     raise ValueError('일별 총매출과 순매출·할인 합계가 다릅니다.')
                 checks = ('gross', 'net', 'discount')
@@ -159,6 +167,13 @@ def read_report(content):
     if not output or totals is None:
         raise ValueError('상세 행과 전체 합계가 모두 필요합니다.')
     for key in checks:
-        if sum(row[key] for row in output) != totals[key]:
+        difference = totals[key] - sum(row[key] for row in output)
+        if difference and kind == 'monthly-profit' and key in ('opening', 'closing') and abs(difference) <= len(output):
+            # Displayed integer inventory values can differ from the aggregate.
+            # Bound the difference to at most one won per displayed item.
+            # Preserve the official footer and disclose the difference, never alter rows.
+            differences[key] = difference
+        elif difference:
             raise ValueError(f'행 합계가 보고서 전체 합계와 다릅니다: {key}')
-    return {'kind': kind, 'rows': output, 'totals': {key: totals[key] for key in checks}}
+    return {'kind': kind, 'rows': output, 'totals': {key: totals[key] for key in checks},
+            'source_differences': differences}

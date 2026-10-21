@@ -11,3 +11,7 @@ browser-profile/
 atpos-profile/
 private-originals/
 .env
+/atpos-session.json
+/atpos-entry.json
+/collection-status.json
+/scheduled-last-attempt.json
