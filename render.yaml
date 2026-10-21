@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: saenong-dashboard
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: saenong-private-data
+      mountPath: /var/saenong
+      sizeGB: 10
+    envVars:
+      - key: SAENONG_VIEWER_PASSWORD
+        generateValue: true
+      - key: ATPOS_ID
+        sync: false
+      - key: ATPOS_PASSWORD
+        sync: false

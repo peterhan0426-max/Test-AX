@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!collector/
+!collector/*.py
+!saenong/
+!saenong/*.py
+!saenong/index.html
