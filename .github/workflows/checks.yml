@@ -20,6 +20,7 @@ jobs:
       - run: python tools/run_ci_check.py tools/check_browser.py
       - run: python tools/run_ci_check.py tools/check_personal.py
       - run: python tools/run_ci_check.py tools/check_auto_refresh.py
+      - run: python tools/run_ci_check.py tools/check_source_connection.py
   container:
     runs-on: ubuntu-24.04
     steps:

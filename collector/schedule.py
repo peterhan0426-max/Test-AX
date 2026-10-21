@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .native import PATHS, STORE_CODES
 from .run import collect_job
+from .credentials import version
 from saenong.data import KST
 
 
@@ -29,12 +30,21 @@ def main():
     args.data_dir.mkdir(parents=True, exist_ok=True)
     marker = args.data_dir / 'scheduled-last-attempt.json'
     last = json.loads(marker.read_text())['date'] if marker.exists() else None
+    previous_version = json.loads(marker.read_text()).get('credential_version') if marker.exists() else None
     now = datetime.now(KST)
     if args.no_catch_up and now >= now.replace(hour=args.hour, minute=args.minute, second=0, microsecond=0):
         last = now.date().isoformat()
+        previous_version = version(args.data_dir)
     print(f'자동 수집 대기: 매일 {args.hour:02}:{args.minute:02} 한국 시간', flush=True)
     try:
         while True:
+            credential_version = version(args.data_dir)
+            if credential_version is None:
+                time.sleep(10)
+                continue
+            if credential_version != previous_version:
+                last = None
+                previous_version = credential_version
             now = datetime.now(KST)
             delay = due_in(now, last, args.hour, args.minute)
             if delay:
@@ -44,7 +54,8 @@ def main():
             previous = (now.date().replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
             result = collect_job(args.data_dir, [previous, current], list(STORE_CODES), list(PATHS))
             last = now.date().isoformat()
-            marker.write_text(json.dumps({'date': last, 'failed': bool(result['failures'])}), encoding='utf-8')
+            marker.write_text(json.dumps({'date': last, 'failed': bool(result['failures']),
+                                         'credential_version': credential_version}), encoding='utf-8')
             # Do not repeatedly retry a failed password/permission without a changed prerequisite.
     except KeyboardInterrupt:
         pass

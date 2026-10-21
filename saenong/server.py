@@ -5,11 +5,14 @@ import binascii
 import hmac
 import json
 import os
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .data import dashboard
+from collector.credentials import connect as connect_source, version as source_version
 
 
 def operational_status(root):
@@ -28,7 +31,8 @@ def operational_status(root):
     name = backup.get('file', '')
     valid_name = isinstance(name, str) and name.startswith('saenong-') and name.endswith('.tar.gz') and Path(name).name == name
     available = bool(valid_name and (backup_dir / name).is_file() and not (backup_dir / name).is_symlink())
-    return {'collection': {'enabled': os.environ.get('SAENONG_AUTOCOLLECT') == '1',
+    connected = source_version(root) is not None or os.environ.get('SAENONG_SOURCE_CONNECTED') == '1'
+    return {'collection': {'enabled': os.environ.get('SAENONG_AUTOCOLLECT') == '1', 'connected': connected,
                            'hour_kst': 8, 'last_finished_at': collection.get('finished_at'),
                            'failure_count': len(collection.get('failures', []))},
             'backup': {'available': available,
@@ -36,10 +40,12 @@ def operational_status(root):
 
 
 def create_server(root, host='127.0.0.1', port=8000, password=None, username='saenong'):
+    connection_lock = threading.Lock()
+    last_connection_attempt = 0
+
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            url = urlsplit(self.path)
-            if password is not None and url.path != '/health':
+        def authenticated(self):
+            if password is not None:
                 scheme, _, value = self.headers.get('Authorization', '').partition(' ')
                 try:
                     supplied = base64.b64decode(value, validate=True) if scheme.lower() == 'basic' else b''
@@ -51,7 +57,13 @@ def create_server(root, host='127.0.0.1', port=8000, password=None, username='sa
                     self.send_header('Cache-Control', 'no-store')
                     self.send_header('Content-Length', '0')
                     self.end_headers()
-                    return
+                    return False
+            return True
+
+        def do_GET(self):
+            url = urlsplit(self.path)
+            if url.path != '/health' and not self.authenticated():
+                return
             if url.path == '/':
                 body = Path(__file__).with_name('index.html').read_bytes()
                 self.send_response(200)
@@ -87,6 +99,66 @@ def create_server(root, host='127.0.0.1', port=8000, password=None, username='sa
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def do_POST(self):
+            nonlocal last_connection_attempt
+            if not self.authenticated():
+                return
+
+            def reply(status, value):
+                body = json.dumps(value).encode()
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.close_connection = True
+                self.wfile.write(body)
+
+            if self.path != '/api/source-connection':
+                reply(404, {'connected': False})
+                return
+            if password is None:
+                reply(503, {'connected': False})
+                return
+            origin = os.environ.get('SAENONG_SITE_ORIGIN') or os.environ.get('RENDER_EXTERNAL_URL') or 'http://' + self.headers.get('Host', '')
+            if self.headers.get('Origin') != origin:
+                reply(403, {'connected': False})
+                return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+            except ValueError:
+                length = 0
+            if not 0 < length <= 8192 or self.headers.get('Content-Type') != 'application/json' or self.headers.get('Transfer-Encoding'):
+                reply(400, {'connected': False})
+                return
+            if not connection_lock.acquire(blocking=False):
+                reply(429, {'connected': False})
+                return
+            try:
+                if time.monotonic() - last_connection_attempt < 10:
+                    reply(429, {'connected': False})
+                    return
+                last_connection_attempt = time.monotonic()
+                deadline, remaining, parts = time.monotonic() + 10, length, []
+                while remaining:
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        raise TimeoutError()
+                    self.connection.settimeout(min(5, left))
+                    chunk = self.rfile.read1(remaining)
+                    if not chunk:
+                        raise ValueError()
+                    parts.append(chunk)
+                    remaining -= len(chunk)
+                value = json.loads(b''.join(parts))
+                connect_source(root, value.get('account'), value.get('password'))
+                reply(200, {'connected': True})
+            except Exception:
+                reply(400, {'connected': False})
+            finally:
+                connection_lock.release()
 
     return ThreadingHTTPServer((host, port), Handler)
 

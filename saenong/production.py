@@ -14,8 +14,8 @@ def main():
     bootstrap = bool(os.environ.get('SAENONG_BOOTSTRAP_TOKEN'))
     if bootstrap and collect:
         raise SystemExit('자료 이관 중에는 자동 수집을 꺼야 합니다.')
-    if len(password) < 20 or (collect and any(not os.environ.get(key) for key in ('ATPOS_ID', 'ATPOS_PASSWORD'))):
-        raise SystemExit('운영용 화면 암호와 ATPOS 인증 설정을 확인해야 합니다.')
+    if len(password) < 20:
+        raise SystemExit('운영용 화면 암호 설정을 확인해야 합니다.')
     base = Path(os.environ.get('SAENONG_ROOT', '/var/saenong'))
     if base.resolve() == Path(base.anchor) or base.resolve() == Path('/app'):
         raise SystemExit('전용 자료 폴더를 사용해야 합니다.')
@@ -36,6 +36,8 @@ def main():
     port = str(int(os.environ.get('PORT', '8000')))
     environment = os.environ.copy()
     environment['SAENONG_REQUIRE_AUTH'] = '1'
+    environment['SAENONG_SOURCE_CONNECTED'] = '1' if all(os.environ.get(key) for key in ('ATPOS_ID', 'ATPOS_PASSWORD')) else '0'
+    environment['SAENONG_AUTOCOLLECT'] = '1' if collect else '0'
     stop = False
 
     def shutdown(*_):

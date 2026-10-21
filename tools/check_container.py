@@ -16,6 +16,7 @@ def main():
     args = parser.parse_args()
     name = 'saenong-check-' + uuid.uuid4().hex[:10]
     volume = name + '-data'
+    waiting_name = name + '-waiting'
 
     def docker(*arguments, check=True):
         return subprocess.run(['docker', *arguments], capture_output=True, text=True,
@@ -92,12 +93,33 @@ else: raise SystemExit('Backup worker not found')
             raise AssertionError('Crash restart did not preserve the imported data')
         print('PASS: container authentication, consistent backup, crash restart and persistent data')
         print('Collector disabled for this synthetic container check; no ATPOS requests were made.')
+        docker('rm', '-f', name)
+        docker('run', '-d', '--name', waiting_name, '--network', 'none',
+               '-e', 'SAENONG_VIEWER_PASSWORD=' + password, '-v', volume + ':/var/saenong', args.image)
+        probe = '''import base64,json,urllib.request
+from pathlib import Path
+headers={'Authorization':'Basic '+base64.b64encode(b'saenong:synthetic-viewer-password').decode()}
+request=urllib.request.Request('http://127.0.0.1:8000/api/status',headers=headers)
+with urllib.request.urlopen(request,timeout=3) as response: status=json.load(response)
+assert status['collection']['enabled'] and not status['collection']['connected']
+assert any((p/'cmdline').read_bytes().split(b'\\0')[1:4]==[b'-u',b'-m',b'collector.schedule']
+           for p in Path('/proc').iterdir() if p.name.isdigit() and (p/'cmdline').exists())
+assert not Path('/var/saenong/data/atpos-session.json').exists()
+'''
+        for _ in range(60):
+            if docker('exec', waiting_name, 'python', '-c', probe, check=False).returncode == 0:
+                break
+            time.sleep(0.5)
+        else:
+            raise AssertionError('Production did not wait safely for source account connection')
+        print('PASS: production waits for first source connection with no external network access')
     except Exception:
         diagnostic = docker('logs', '--tail', '60', name, check=False)
         print(diagnostic.stdout + diagnostic.stderr)
         raise
     finally:
         docker('rm', '-f', name, check=False)
+        docker('rm', '-f', waiting_name, check=False)
         docker('volume', 'rm', volume, check=False)
 
 

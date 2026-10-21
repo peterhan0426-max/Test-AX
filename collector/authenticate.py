@@ -2,7 +2,6 @@
 import argparse
 import http.cookiejar
 import json
-import os
 import re
 import ssl
 import urllib.parse
@@ -32,8 +31,10 @@ def login_request(account, password, stage):
                                   headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': LOGIN})
 
 
-def establish_session(root):
-    account, password = os.environ.get('ATPOS_ID'), os.environ.get('ATPOS_PASSWORD')
+def establish_session(root, account=None, password=None):
+    if account is None and password is None:
+        from .credentials import load
+        account, password = load(root)
     if not account or not password:
         raise RuntimeError('환경 설정의 ATPOS_ID 및 ATPOS_PASSWORD 연결이 필요합니다.')
     jar = http.cookiejar.CookieJar()
