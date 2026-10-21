@@ -12,6 +12,29 @@ from urllib.parse import parse_qs, urlsplit
 from .data import dashboard
 
 
+def operational_status(root):
+    root = Path(root)
+
+    def metadata(path):
+        try:
+            value = json.loads(path.read_text('utf-8'))
+            return value if isinstance(value, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    collection = metadata(root / 'collection-status.json')
+    backup_dir = root.parent / 'backups'
+    backup = metadata(backup_dir / 'backup-status.json')
+    name = backup.get('file', '')
+    valid_name = isinstance(name, str) and name.startswith('saenong-') and name.endswith('.tar.gz') and Path(name).name == name
+    available = bool(valid_name and (backup_dir / name).is_file() and not (backup_dir / name).is_symlink())
+    return {'collection': {'enabled': os.environ.get('SAENONG_AUTOCOLLECT') == '1',
+                           'hour_kst': 8, 'last_finished_at': collection.get('finished_at'),
+                           'failure_count': len(collection.get('failures', []))},
+            'backup': {'available': available,
+                       'last_completed_at': backup.get('finished_at') if available else None}}
+
+
 def create_server(root, host='127.0.0.1', port=8000, password=None, username='saenong'):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -41,6 +64,10 @@ def create_server(root, host='127.0.0.1', port=8000, password=None, username='sa
                 except (ValueError, KeyError):
                     self.send_error(400, 'Invalid period or category configuration')
                     return
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+            elif url.path == '/api/status':
+                body = json.dumps(operational_status(root), ensure_ascii=False).encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json; charset=utf-8')
             elif url.path == '/health':

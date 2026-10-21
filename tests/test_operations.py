@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from saenong.backup import create_backup, restore_backup
 from saenong.bootstrap import create_server as bootstrap_server
 from saenong.data import dashboard, import_report
-from saenong.server import create_server
+from saenong.server import create_server, operational_status
 
 
 def seed(root, net=100):
@@ -107,6 +107,11 @@ class OperationsTest(unittest.TestCase):
                         urlopen(Request(base + '/api/dashboard', headers={'Authorization': value}))
                     self.assertEqual(error.exception.code, 401)
                 authorization = 'Basic ' + base64.b64encode(('saenong:' + password).encode()).decode()
+                with self.assertRaises(HTTPError) as error:
+                    urlopen(base + '/api/status')
+                self.assertEqual(error.exception.code, 401)
+                with urlopen(Request(base + '/api/status', headers={'Authorization': authorization})) as response:
+                    self.assertFalse(json.load(response)['backup']['available'])
                 with urlopen(Request(base + '/api/dashboard', headers={'Authorization': authorization})) as response:
                     self.assertEqual(json.load(response)['stores'][0]['gross'], 110)
             finally:
@@ -123,6 +128,12 @@ class OperationsTest(unittest.TestCase):
             seed(data, net=200)
             (data / 'atpos-session.json').write_text('{"cookie":"DO_NOT_EXPORT"}')
             archive = create_backup(data, backups, keep=1)
+            (data / 'collection-status.json').write_text(json.dumps({'finished_at': '2026-10-21T09:00:00+09:00',
+                'failures': [], 'private_credential': 'DO_NOT_EXPORT'}))
+            status = operational_status(data)
+            self.assertTrue(status['backup']['available'])
+            self.assertIsNotNone(status['backup']['last_completed_at'])
+            self.assertNotIn('DO_NOT_EXPORT', json.dumps(status))
             with tarfile.open(archive) as stream:
                 self.assertNotIn('atpos-session.json', stream.getnames())
                 self.assertEqual(len([member for member in stream if member.name.startswith('private-originals/')]), 2)
