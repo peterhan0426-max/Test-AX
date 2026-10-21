@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>새농 · 개인용 매출 화면</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f6f2;color:#18352b;font:16px system-ui,'Malgun Gothic',sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px}main{background:white;border:1px solid #dce5dd;border-radius:14px;padding:32px;max-width:440px;width:100%}h1{font-size:24px;margin:0 0 14px}p{color:#69786e;line-height:1.7;font-size:14px}label{display:block;margin:24px 0 8px;font-size:14px}input,button{font:inherit;padding:12px;border-radius:8px;width:100%}input{border:1px solid #b9c8bf}button{border:0;background:#287752;color:white;margin-top:12px;cursor:pointer}button:disabled{opacity:.6}#message{color:#a03535;min-height:24px;font-size:13px}
+</style>
+<main><h1>새농 · 매출과 이익</h1><p>보호된 개인용 자료입니다.<br>전달받은 열기 암호를 입력해 주세요.</p>
+<form id="unlock"><label for="password">열기 암호</label><input id="password" type="password" autocomplete="off" required autofocus><button id="open" type="submit">열기</button><p id="message" role="alert"></p></form></main>
+<script id="sealed-data" type="application/json">SEALED_PAYLOAD</script>
+<script>
+document.getElementById('unlock').addEventListener('submit',async event=>{event.preventDefault();const button=document.getElementById('open'),message=document.getElementById('message');button.disabled=true;message.textContent='';try{if(!globalThis.crypto?.subtle)throw Error('unsupported');const data=JSON.parse(document.getElementById('sealed-data').textContent),bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)),base=await crypto.subtle.importKey('raw',new TextEncoder().encode(document.getElementById('password').value),'PBKDF2',false,['deriveKey']),key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:bytes(data.salt),iterations:data.iterations,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']),plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(data.iv)},key,bytes(data.ciphertext));document.open();document.write(new TextDecoder().decode(plain));document.close()}catch(error){message.textContent=globalThis.crypto?.subtle?'암호가 맞지 않거나 파일이 손상되었습니다. 다시 확인해 주세요.':'이 브라우저에서 파일을 열 수 없습니다. 최신 Chrome 또는 Edge로 열어 주세요.';button.disabled=false;document.getElementById('password').select()}});
+</script>
+</html>

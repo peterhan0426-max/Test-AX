@@ -4,6 +4,35 @@
 농할·수산대전·임산부 프로모션 할인을 보여주는 조회 전용 웹 애플리케이션입니다.
 일반 사용자는 웹사이트만 조회하며 파일 업로드나 수정 기능은 제공하지 않습니다.
 
+## 우선 본인만 화면을 보는 방법
+
+환경 게시나 공개 서버 없이도 브라우저에서 월 선택·차트·표를 볼 수 있는
+**개인용 HTML 저장본**을 지원합니다. Python 설치나 ATPOS 로그인이 필요 없습니다.
+전달된 `saenong-dashboard.zip`을 풀고 `새농.html`을 Chrome 또는 Edge에서 열어
+별도로 전달받은 열기 암호를 입력합니다. 이 암호는 ATPOS 로그인 암호와 다릅니다.
+
+이 파일은 저장 시점의 자료이며 **매일 자동으로 갱신되지 않습니다.**
+화면에 저장 시각과 각 보고서 기준일을 표시합니다. 원본 불일치로 보류한 마진도 그대로 보류합니다.
+자동 수집 프로그램과 원본 보관은 유지하며, 개인용 화면 전달에 환경 게시 성공을 요구하지 않습니다.
+
+실제 매출이 담긴 원본 HTML과 열기 암호는 저장소 밖에 보관합니다.
+전달용 ZIP에는 AES-256-GCM으로 암호화된 HTML 하나만 넣으며,
+ATPOS 인증 정보·고객별 원본·데이터베이스·열기 암호를 넣지 않습니다.
+
+개발자가 자료를 갱신하고 전달용 파일을 만드는 명령은 다음과 같습니다.
+
+```sh
+python -m saenong.offline --data-dir /private/saenong --output /private/saenong/delivery/saenong.html
+python tools/package_viewer.py --source /private/saenong/delivery/saenong.html --output /private/saenong/delivery/saenong-dashboard.zip --password-file /private/saenong/viewer-password.txt --executable /usr/bin/chromium
+python tools/check_offline.py --archive /private/saenong/delivery/saenong-dashboard.zip --password-file /private/saenong/viewer-password.txt --data-dir /private/saenong --executable /usr/bin/chromium
+```
+
+포장은 기존 Playwright와 브라우저 Web Crypto를 사용합니다. 파일을 보는 사람에게는 브라우저만 필요합니다.
+합성 매출로 전체 전달 과정을 검사하는 `python tools/check_personal.py`를 Windows·Linux CI에 포함했습니다.
+이 개발 환경의 관리 정책은 `file://` 열기를 막으므로, 여기서는 같은 문서를 Blob으로 열고
+인터넷과 초기화 서버를 모두 끈 뒤 검사합니다. 직접 파일 열기 검사는 이 환경에서 미실행이며,
+CI 실행 결과와 구분합니다.
+
 ## 현재 검증 범위
 
 실제 ATPOS 로그인과 세 매장의 월별 손익·일별 매출·프로모션 요약·상세 다운로드를 검증했습니다.
@@ -98,7 +127,8 @@ python -m saenong.server --data-dir /private/saenong --port 8000
 조회 API와 화면만 서비스하며 원본·SQLite·로그인 세션은 HTTP로 제공하지 않습니다.
 분석 저장 자료에는 고객명·고객번호·카드번호·영수증번호를 넣지 않습니다.
 원본에는 개인정보가 있으므로 코드 폴더 밖의 비공개 경로에서 보관·접근 통제·백업합니다.
-매출 원본, 실제 매출 데이터, 인증 연결, 로그인 세션은 GitHub에 올리지 않습니다.
+매출 원본, 평문 매출 데이터, 인증 연결, 로그인 세션은 GitHub에 올리지 않습니다.
+개인용 화면을 전달할 때는 위의 암호화된 ZIP만 사용할 수 있으며, 열기 암호는 함께 저장하지 않습니다.
 
 외부에서 받은 파일을 개발자가 검증해 가져오는 명령도 지원합니다.
 

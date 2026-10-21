@@ -15,3 +15,6 @@ private-originals/
 /atpos-entry.json
 /collection-status.json
 /scheduled-last-attempt.json
+/viewer/*
+!/viewer/README.md
+!/viewer/saenong-dashboard.zip
