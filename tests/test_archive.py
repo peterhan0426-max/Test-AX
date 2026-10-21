@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from collector.capture import archive
@@ -17,7 +18,7 @@ class ArchiveTest(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertEqual(len(list((root / 'private-originals').iterdir())), 1)
             self.assertEqual((root / 'private-originals' / (first + '.xls')).read_bytes(), source.read_bytes())
-            with sqlite3.connect(root / 'captures.sqlite3') as db:
+            with closing(sqlite3.connect(root / 'captures.sqlite3')) as db:
                 self.assertEqual(db.execute('SELECT COUNT(*) FROM captures').fetchone()[0], 2)
 
 

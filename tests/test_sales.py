@@ -64,8 +64,8 @@ class SalesTest(unittest.TestCase):
                     (b'', {'rows': rows[1:2]}), (b'', {'rows': rows[2:3]})]
                 self.assertEqual(sync_categories(directory, '2024-01', ['가락']), 4)
             root = Path(directory)
-            self.assertEqual(json.loads((root / 'product-categories.json').read_text())['D'], '기타')
-            self.assertNotIn('공통', json.loads((root / 'categories.json').read_text()))
+            self.assertEqual(json.loads((root / 'product-categories.json').read_text('utf-8'))['D'], '기타')
+            self.assertNotIn('공통', json.loads((root / 'categories.json').read_text('utf-8')))
 
     def test_stream_heartbeat_does_not_keep_report_alive_forever(self):
         from unittest.mock import Mock

@@ -6,6 +6,7 @@ import os
 import sqlite3
 import uuid
 import time
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -22,7 +23,7 @@ def archive(source: Path, root: Path, metadata: dict):
     if not target.exists():
         with target.open('xb') as stream:
             stream.write(content)
-    with sqlite3.connect(root / 'captures.sqlite3') as db:
+    with closing(sqlite3.connect(root / 'captures.sqlite3')) as db, db:
         db.execute('''CREATE TABLE IF NOT EXISTS captures (
             id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, metadata TEXT NOT NULL,
             captured_at TEXT NOT NULL)''')
