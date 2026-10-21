@@ -92,6 +92,19 @@ def main():
                         'conditions_verified': False,
                     })
                     print('원본 보관 완료:', digest[:12], '(조회 조건·내용 검증 전)')
+                    # Conditions for monthly reports are entered once for the downloaded report.
+                    # Never combine multiple months or stores into one financial snapshot.
+                    if first.strftime('%Y-%m') == last.strftime('%Y-%m') and store in ('가락', '야탑', '동천'):
+                        from saenong.data import import_report
+                        try:
+                            result = import_report(root, temporary, store, first.strftime('%Y-%m'), end)
+                            if result['kind'] != REPORTS[int(kind) - 1]:
+                                print('안내: 선택한 종류와 파일 종류가 달라 파일의 실제 종류로 반영했습니다.')
+                            print('집계 검증 및 대시보드 반영 완료:', result['rows'], '행')
+                        except ValueError as error:
+                            print('원본만 보관했습니다. 집계 미반영:', str(error))
+                    else:
+                        print('원본만 보관했습니다. 집계는 단일 매장·단일 월 조회를 사용하세요.')
                 except Exception as error:
                     print('보관 실패:', type(error).__name__, '다시 시도하세요.')
                 finally:
