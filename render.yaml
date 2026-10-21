@@ -2,7 +2,10 @@ services:
   - type: web
     name: saenong-dashboard
     runtime: docker
-    plan: starter
+    plan: 0.5c-512mb
+    region: singapore
+    branch: main
+    autoDeployTrigger: 'off'
     healthCheckPath: /health
     disk:
       name: saenong-private-data

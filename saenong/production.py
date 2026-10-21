@@ -11,6 +11,9 @@ from pathlib import Path
 def main():
     password = os.environ.get('SAENONG_VIEWER_PASSWORD', '')
     collect = os.environ.get('SAENONG_AUTOCOLLECT', '1') != '0'
+    bootstrap = bool(os.environ.get('SAENONG_BOOTSTRAP_TOKEN'))
+    if bootstrap and collect:
+        raise SystemExit('자료 이관 중에는 자동 수집을 꺼야 합니다.')
     if len(password) < 20 or (collect and any(not os.environ.get(key) for key in ('ATPOS_ID', 'ATPOS_PASSWORD'))):
         raise SystemExit('운영용 화면 암호와 ATPOS 인증 설정을 확인해야 합니다.')
     base = Path(os.environ.get('SAENONG_ROOT', '/var/saenong'))
@@ -44,7 +47,8 @@ def main():
     children = []
     try:
         web_environment = {key: value for key, value in environment.items() if key not in ('ATPOS_ID', 'ATPOS_PASSWORD')}
-        web = subprocess.Popen([sys.executable, '-u', '-m', 'saenong.server', '--host', '0.0.0.0',
+        module = 'saenong.bootstrap' if bootstrap else 'saenong.server'
+        web = subprocess.Popen([sys.executable, '-u', '-m', module, '--host', '0.0.0.0',
                                 '--port', port, '--data-dir', str(data)], env=web_environment)
         children.append(web)
         for attempt in range(60):
@@ -65,9 +69,10 @@ def main():
             children.append(subprocess.Popen([sys.executable, '-u', '-m', 'collector.schedule',
                                               '--data-dir', str(data), '--hour', '8'], env=worker_environment))
         backup_environment = {key: value for key, value in worker_environment.items() if key not in ('ATPOS_ID', 'ATPOS_PASSWORD')}
-        children.append(subprocess.Popen([sys.executable, '-u', '-m', 'saenong.backup', '--daily',
-                                          '--data-dir', str(data), '--backup-dir', str(backups)], env=backup_environment))
-        print('운영 프로세스 시작: 매일 08:00 수집, 09:00 백업 (한국 시간).', flush=True)
+        if not bootstrap:
+            children.append(subprocess.Popen([sys.executable, '-u', '-m', 'saenong.backup', '--daily',
+                                              '--data-dir', str(data), '--backup-dir', str(backups)], env=backup_environment))
+        print('자료 이관 모드 시작.' if bootstrap else '운영 프로세스 시작: 매일 08:00 수집, 09:00 백업 (한국 시간).', flush=True)
         while not stop:
             if any(child.poll() is not None for child in children):
                 raise RuntimeError('하위 프로세스 종료: 호스팅에서 전체 서비스를 다시 시작해야 합니다.')
